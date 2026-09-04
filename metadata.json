@@ -1,0 +1,6 @@
+{
+  "name": "SlideCast Studio - PowerPoint & AI Narration Video Generator",
+  "description": "Browser-based presentation generator with rich slide editing, Microsoft Edge TTS AI narration, and video export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

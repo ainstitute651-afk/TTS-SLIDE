@@ -13,10 +13,11 @@ import {
   VolumeX,
   Gauge,
   Music,
+  Users,
 } from 'lucide-react';
 import { Slide, VoiceSettings, Presentation } from '../types/presentation';
 import { EDGE_VOICES } from '../constants/voices';
-import { getOrGenerateSlideAudio } from '../services/ttsService';
+import { getOrGenerateSlideAudio, parseDialogueTurns, previewVoiceSample } from '../services/ttsService';
 
 interface ScriptPanelProps {
   slide: Slide;
@@ -56,6 +57,11 @@ export const ScriptPanel: React.FC<ScriptPanelProps> = ({
 
   const wordCount = slide.script.trim() ? slide.script.trim().split(/\s+/).length : 0;
   const estimatedSeconds = Math.max(2, Math.round(wordCount / 2.5 / (voiceSettings.rate || 1.0)));
+
+  // Multi-voice dialogue turn detection
+  const dialogueTurns = parseDialogueTurns(slide.script || '');
+  const uniqueSpeakers = Array.from(new Set(dialogueTurns.map((t) => t.speaker))).filter(Boolean);
+  const isDialogue = uniqueSpeakers.length > 1;
 
   // Handle Play/Stop TTS
   const handlePlayTTS = async () => {
@@ -170,6 +176,14 @@ export const ScriptPanel: React.FC<ScriptPanelProps> = ({
           <span className="text-[11px] text-gray-500 font-mono hidden sm:inline">
             ({wordCount} words • ~{estimatedSeconds}s)
           </span>
+
+          {/* Dialogue active indicator chip */}
+          {isDialogue && (
+            <span className="flex items-center gap-1 text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/40 px-2 py-0.5 rounded-full font-medium shadow-sm">
+              <Users className="w-3 h-3 text-purple-400" />
+              <span>Multi-Voice ({uniqueSpeakers.length} Speakers)</span>
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
@@ -202,23 +216,39 @@ export const ScriptPanel: React.FC<ScriptPanelProps> = ({
         <div className="p-3 flex flex-col md:flex-row gap-3">
           {/* Left: Script textarea + SSML helpers */}
           <div className="flex-1 flex flex-col min-w-0">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[10px] text-gray-400 font-medium">Slide Narration Script:</span>
-              {/* SSML Tag shortcuts */}
-              <div className="flex items-center gap-1">
+            <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] text-gray-400 font-medium">Slide Narration Script:</span>
+                {isDialogue && (
+                  <span className="text-[10px] text-purple-400 font-mono">
+                    {uniqueSpeakers.join(' ↔ ')}
+                  </span>
+                )}
+              </div>
+              {/* SSML & Dialogue Tag shortcuts */}
+              <div className="flex items-center gap-1 flex-wrap">
+                <button
+                  onClick={() => insertSSMLTag('\n[Host 1]: ')}
+                  className="text-[10px] px-1.5 py-0.5 rounded bg-[#222] hover:bg-purple-900/30 text-purple-300 border border-purple-500/30 font-mono transition flex items-center gap-1"
+                  title="Insert Host 1 Dialogue Tag"
+                >
+                  <Users className="w-2.5 h-2.5 text-purple-400" />
+                  <span>+Host 1</span>
+                </button>
+                <button
+                  onClick={() => insertSSMLTag('\n[Host 2]: ')}
+                  className="text-[10px] px-1.5 py-0.5 rounded bg-[#222] hover:bg-purple-900/30 text-purple-300 border border-purple-500/30 font-mono transition flex items-center gap-1"
+                  title="Insert Host 2 Dialogue Tag"
+                >
+                  <Users className="w-2.5 h-2.5 text-purple-400" />
+                  <span>+Host 2</span>
+                </button>
                 <button
                   onClick={() => insertSSMLTag('[pause:1s]')}
                   className="text-[10px] px-2 py-0.5 rounded bg-[#222] hover:bg-[#2A2A2A] text-gray-300 border border-[#333] font-mono transition"
                   title="Insert 1 second pause"
                 >
                   +1s pause
-                </button>
-                <button
-                  onClick={() => insertSSMLTag('[pause:2s]')}
-                  className="text-[10px] px-2 py-0.5 rounded bg-[#222] hover:bg-[#2A2A2A] text-gray-300 border border-[#333] font-mono transition"
-                  title="Insert 2 second pause"
-                >
-                  +2s pause
                 </button>
                 <button
                   onClick={() => insertSSMLTag('[emphasis]')}
@@ -240,7 +270,7 @@ export const ScriptPanel: React.FC<ScriptPanelProps> = ({
             <textarea
               value={slide.script}
               onChange={(e) => onUpdateSlideScript(e.target.value)}
-              placeholder="Enter what the AI voice will say during this slide..."
+              placeholder="Enter narration or multi-voice dialogue using [Host 1]: and [Host 2]: syntax..."
               className="w-full h-20 bg-[#121212] border border-[#2A2A2A] rounded p-2 text-xs text-gray-100 placeholder-gray-600 outline-none focus:border-blue-600 resize-none font-sans leading-relaxed"
             />
           </div>
@@ -293,7 +323,17 @@ export const ScriptPanel: React.FC<ScriptPanelProps> = ({
             <div>
               <div className="flex justify-between items-center mb-0.5">
                 <span className="text-[10px] text-gray-400 font-medium">Edge Neural Voice:</span>
-                <span className="text-[10px] text-blue-400 font-mono">{selectedVoice.lang}</span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => previewVoiceSample(voiceSettings.voice)}
+                    className="text-[10px] text-blue-400 hover:text-blue-300 font-medium underline flex items-center gap-0.5"
+                    title="Audition voice with a short phrase"
+                  >
+                    <Volume2 className="w-2.5 h-2.5" />
+                    <span>Sample</span>
+                  </button>
+                  <span className="text-[10px] text-gray-500 font-mono">{selectedVoice.lang}</span>
+                </div>
               </div>
               <select
                 value={voiceSettings.voice}

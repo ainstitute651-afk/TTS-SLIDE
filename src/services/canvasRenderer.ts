@@ -1,4 +1,4 @@
-import { Slide, SlideElement, MasterSlide, TransitionType, TextElement, ShapeElement, ImageElement, TableElement, IconElement } from '../types/presentation';
+import { Slide, SlideElement, MasterSlide, TransitionType, TextElement, ShapeElement, ImageElement, TableElement, IconElement, CaptionSettings, KenBurnsSettings } from '../types/presentation';
 
 // Cache for loaded HTML images
 const imageCache = new Map<string, HTMLImageElement>();
@@ -52,10 +52,38 @@ export function renderSlideBackground(
   ctx: CanvasRenderingContext2D,
   slide: Slide,
   width: number,
-  height: number
+  height: number,
+  kenBurnsProgress?: number
 ): void {
   const bg = slide.background;
   ctx.save();
+
+  // Apply subtle Ken Burns camera motion if enabled
+  if (slide.kenBurns?.enabled && kenBurnsProgress !== undefined) {
+    const p = Math.max(0, Math.min(1, kenBurnsProgress));
+    const effect = slide.kenBurns.effect || 'zoom-in';
+    const intensity = slide.kenBurns.intensity || 1.10;
+    ctx.translate(width / 2, height / 2);
+
+    if (effect === 'zoom-in') {
+      const s = 1.0 + (intensity - 1.0) * p;
+      ctx.scale(s, s);
+    } else if (effect === 'zoom-out') {
+      const s = intensity - (intensity - 1.0) * p;
+      ctx.scale(s, s);
+    } else if (effect === 'pan-left') {
+      ctx.scale(1.08, 1.08);
+      ctx.translate((0.03 - 0.06 * p) * width, 0);
+    } else if (effect === 'pan-right') {
+      ctx.scale(1.08, 1.08);
+      ctx.translate((-0.03 + 0.06 * p) * width, 0);
+    } else if (effect === 'subtle-drift') {
+      const s = 1.0 + 0.06 * p;
+      ctx.scale(s, s);
+      ctx.translate((-0.015 + 0.03 * p) * width, (-0.01 + 0.02 * p) * height);
+    }
+    ctx.translate(-width / 2, -height / 2);
+  }
 
   if (bg.type === 'solid') {
     ctx.fillStyle = bg.color || '#0f172a';
@@ -194,8 +222,83 @@ export function renderMasterSlide(
 export function renderElement(
   ctx: CanvasRenderingContext2D,
   element: SlideElement,
-  scale: number = 1
+  scale: number = 1,
+  timeInSlide?: number
 ): void {
+  // Check element entrance animation timeline if timeInSlide is provided (live preview / video export)
+  if (timeInSlide !== undefined && element.animation && element.animation.type !== 'none') {
+    const delay = element.animation.delay || 0;
+    const duration = Math.max(0.2, element.animation.duration || 0.6);
+
+    // If currentTime is prior to this element's cue delay, skip rendering
+    if (timeInSlide < delay) {
+      return;
+    }
+
+    // If currently animating in: calculate progress & transform
+    if (timeInSlide < delay + duration) {
+      const rawProgress = (timeInSlide - delay) / duration;
+      // Smooth cubic ease out
+      const t = 1 - Math.pow(1 - rawProgress, 3);
+
+      ctx.save();
+      const x = element.x * scale;
+      const y = element.y * scale;
+      const w = element.width * scale;
+      const h = element.height * scale;
+      const cx = x + w / 2;
+      const cy = y + h / 2;
+
+      ctx.translate(cx, cy);
+      if (element.rotation) {
+        ctx.rotate((element.rotation * Math.PI) / 180);
+      }
+
+      const animType = element.animation.type;
+      let alphaMultiplier = t;
+
+      if (animType === 'fly-left') {
+        ctx.translate(-140 * (1 - t) * scale, 0);
+      } else if (animType === 'fly-right') {
+        ctx.translate(140 * (1 - t) * scale, 0);
+      } else if (animType === 'fly-top') {
+        ctx.translate(0, -140 * (1 - t) * scale);
+      } else if (animType === 'fly-bottom') {
+        ctx.translate(0, 140 * (1 - t) * scale);
+      } else if (animType === 'zoom-in') {
+        const s = 0.3 + 0.7 * t;
+        ctx.scale(s, s);
+      } else if (animType === 'bounce-in') {
+        const s = rawProgress < 0.7 ? (rawProgress / 0.7) * 1.15 : 1.15 - ((rawProgress - 0.7) / 0.3) * 0.15;
+        ctx.scale(s, s);
+        alphaMultiplier = Math.min(1, rawProgress * 2);
+      } else if (animType === 'rotate-in') {
+        ctx.rotate(-45 * (1 - t) * (Math.PI / 180));
+        const s = 0.5 + 0.5 * t;
+        ctx.scale(s, s);
+      }
+
+      ctx.globalAlpha = Math.max(0, Math.min(1, (element.opacity ?? 1) * alphaMultiplier));
+      ctx.translate(-cx, -cy);
+
+      if (element.shadowBlur && element.shadowColor) {
+        ctx.shadowBlur = element.shadowBlur * scale;
+        ctx.shadowOffsetX = (element.shadowOffsetX ?? 0) * scale;
+        ctx.shadowOffsetY = (element.shadowOffsetY ?? 4) * scale;
+        ctx.shadowColor = element.shadowColor;
+      }
+
+      if (element.type === 'text') renderTextElement(ctx, element, x, y, w, h, scale);
+      else if (element.type === 'shape') renderShapeElement(ctx, element, x, y, w, h, scale);
+      else if (element.type === 'image') renderImageElement(ctx, element, x, y, w, h, scale);
+      else if (element.type === 'table') renderTableElement(ctx, element, x, y, w, h, scale);
+      else if (element.type === 'icon') renderIconElement(ctx, element, x, y, w, h, scale);
+
+      ctx.restore();
+      return;
+    }
+  }
+
   ctx.save();
 
   const x = element.x * scale;
@@ -625,6 +728,98 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.closePath();
 }
 
+// Render animated karaoke & social captions
+export function renderAnimatedCaptions(
+  ctx: CanvasRenderingContext2D,
+  script: string,
+  progress: number, // 0 to 1
+  settings: CaptionSettings,
+  width: number,
+  height: number,
+  scale: number
+): void {
+  if (!settings.enabled || !script) return;
+
+  // Clean script of SSML and pause tags
+  const cleanScript = script.replace(/\[[^\]]+\]/g, '').replace(/<[^>]+>/g, '').trim();
+  const words = cleanScript.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return;
+
+  // Calculate active word index
+  const activeWordIdx = Math.min(words.length - 1, Math.floor(progress * words.length));
+
+  // Determine sliding window chunk (4 to 6 words)
+  const chunkSize = 5;
+  const chunkStart = Math.max(0, Math.min(words.length - chunkSize, activeWordIdx - 2));
+  const chunkWords = words.slice(chunkStart, chunkStart + chunkSize);
+  const activeInChunk = activeWordIdx - chunkStart;
+
+  ctx.save();
+
+  // Position
+  let y = height - 130 * scale;
+  if (settings.position === 'top') y = 110 * scale;
+  else if (settings.position === 'center') y = height / 2;
+
+  const fontSize = Math.round((settings.fontSize || 38) * scale);
+  ctx.font = `700 ${fontSize}px "Outfit", "Inter", sans-serif`;
+  ctx.textBaseline = 'middle';
+
+  // Measure word widths
+  const wordWidths = chunkWords.map(w => ctx.measureText(w + ' ').width);
+  const totalWidth = wordWidths.reduce((a, b) => a + b, 0);
+
+  const startX = (width - totalWidth) / 2;
+
+  // Render frosted background pill
+  const paddingH = 28 * scale;
+  const paddingV = 16 * scale;
+  const pillHeight = fontSize + paddingV * 2;
+  const pillY = y - pillHeight / 2;
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(15, 15, 15, 0.82)';
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+  ctx.lineWidth = 1.5 * scale;
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+  ctx.shadowBlur = 14 * scale;
+  roundRect(ctx, startX - paddingH, pillY, totalWidth + paddingH * 2, pillHeight, 14 * scale);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+
+  // Render individual words with karaoke active highlight
+  let curX = startX;
+  chunkWords.forEach((word, idx) => {
+    const isActive = idx === activeInChunk;
+    const wWidth = wordWidths[idx];
+
+    ctx.save();
+    if (isActive) {
+      const highlightColor = settings.highlightColor || '#3B82F6';
+
+      ctx.fillStyle = highlightColor;
+      ctx.shadowColor = highlightColor;
+      ctx.shadowBlur = 10 * scale;
+
+      // Bounce effect
+      if (settings.style === 'bounce-pop') {
+        ctx.translate(0, -4 * scale);
+      }
+      ctx.font = `800 ${fontSize * 1.06}px "Outfit", "Inter", sans-serif`;
+    } else {
+      ctx.fillStyle = settings.textColor || 'rgba(255, 255, 255, 0.9)';
+    }
+
+    ctx.fillText(word, curX, y);
+    ctx.restore();
+
+    curX += wWidth;
+  });
+
+  ctx.restore();
+}
+
 // Render complete slide to canvas
 export function renderCompleteSlide(
   ctx: CanvasRenderingContext2D,
@@ -633,21 +828,33 @@ export function renderCompleteSlide(
   totalSlides: number,
   masterSlide: MasterSlide,
   width: number = 1920,
-  height: number = 1080
+  height: number = 1080,
+  currentTimeInSlide?: number,
+  slideDuration?: number,
+  captionSettings?: CaptionSettings
 ): void {
   const scale = width / 1920;
+  const kenBurnsProgress = (currentTimeInSlide !== undefined && slideDuration && slideDuration > 0)
+    ? Math.max(0, Math.min(1, currentTimeInSlide / slideDuration))
+    : undefined;
 
-  // 1. Background
-  renderSlideBackground(ctx, slide, width, height);
+  // 1. Background (with subtle Ken Burns if active)
+  renderSlideBackground(ctx, slide, width, height, kenBurnsProgress);
 
-  // 2. Elements sorted by z-index
+  // 2. Elements sorted by z-index (with animation timeline if active)
   const sortedElements = [...slide.elements].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
   for (const el of sortedElements) {
-    renderElement(ctx, el, scale);
+    renderElement(ctx, el, scale, currentTimeInSlide);
   }
 
   // 3. Master Slide Overlay
   renderMasterSlide(ctx, masterSlide, slideIndex, totalSlides, width, height, scale);
+
+  // 4. Animated Karaoke / Social Captions
+  if (captionSettings?.enabled && slide.script && currentTimeInSlide !== undefined && slideDuration) {
+    const progress = Math.max(0, Math.min(1, currentTimeInSlide / slideDuration));
+    renderAnimatedCaptions(ctx, slide.script, progress, captionSettings, width, height, scale);
+  }
 }
 
 // Render transition frame between two slides

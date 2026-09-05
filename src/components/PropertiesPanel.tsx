@@ -41,6 +41,8 @@ interface PropertiesPanelProps {
   onSendBackward: () => void;
   onBringToFront: () => void;
   onSendToBack: () => void;
+  onUpdateSlideKenBurns?: (kb: Slide['kenBurns'], applyToAll?: boolean) => void;
+  onUpdatePresentationSettings?: (settings: Partial<Presentation>) => void;
 }
 
 const TRANSITIONS: { id: TransitionType; label: string }[] = [
@@ -81,6 +83,8 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   onSendBackward,
   onBringToFront,
   onSendToBack,
+  onUpdateSlideKenBurns,
+  onUpdatePresentationSettings,
 }) => {
   const [activeTab, setActiveTab] = useState<'element' | 'background' | 'theme' | 'transition' | 'master'>(
     selectedElement ? 'element' : 'background'
@@ -342,6 +346,116 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                 />
               </div>
             </div>
+
+            {/* ELEMENT ANIMATION & NARRATION CUE TIMELINE */}
+            <div className="space-y-2.5 pt-2 border-t border-[#2A2A2A]">
+              <div className="flex items-center justify-between">
+                <div className="text-[11px] font-semibold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Animation & Cue Timeline</span>
+                </div>
+                {selectedElement.animation && selectedElement.animation.type !== 'none' && (
+                  <span className="text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded font-mono">
+                    Active
+                  </span>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-[10px] text-gray-400 uppercase">Entrance Effect</label>
+                <select
+                  value={selectedElement.animation?.type || 'none'}
+                  onChange={(e) => {
+                    const animType = e.target.value as any;
+                    onUpdateElement({
+                      animation: {
+                        type: animType,
+                        duration: selectedElement.animation?.duration ?? 0.6,
+                        delay: selectedElement.animation?.delay ?? 0,
+                        trigger: selectedElement.animation?.trigger ?? 'time-cue',
+                        cuePointSec: selectedElement.animation?.cuePointSec ?? 0,
+                        easing: 'ease-out',
+                      }
+                    });
+                  }}
+                  className="w-full bg-[#121212] border border-[#2A2A2A] rounded px-2 py-1.5 text-xs text-gray-100 outline-none focus:border-blue-600"
+                >
+                  <option value="none">None (Static)</option>
+                  <option value="fade-in">Fade In</option>
+                  <option value="fly-left">Fly In from Left</option>
+                  <option value="fly-right">Fly In from Right</option>
+                  <option value="fly-top">Fly In from Top</option>
+                  <option value="fly-bottom">Fly In from Bottom</option>
+                  <option value="zoom-in">Zoom In / Scale Pop</option>
+                  <option value="bounce-in">Elastic Bounce In</option>
+                  <option value="rotate-in">Smooth Rotate In</option>
+                </select>
+              </div>
+
+              {selectedElement.animation && selectedElement.animation.type !== 'none' && (
+                <div className="space-y-2.5 bg-[#121212] p-2.5 rounded border border-[#2A2A2A]">
+                  <div className="space-y-1">
+                    <label className="block text-[10px] text-gray-400 uppercase">Trigger Mode</label>
+                    <select
+                      value={selectedElement.animation.trigger || 'time-cue'}
+                      onChange={(e) => onUpdateElement({
+                        animation: { ...selectedElement.animation!, trigger: e.target.value as any }
+                      })}
+                      className="w-full bg-[#181818] border border-[#333] rounded px-2 py-1 text-xs text-gray-100 outline-none"
+                    >
+                      <option value="time-cue">Narration Time Cue (Seconds)</option>
+                      <option value="after-previous">After Previous Element</option>
+                      <option value="with-previous">With Previous Element</option>
+                      <option value="on-click">On Click / Manual Step</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-gray-400">Audio Cue Delay</span>
+                      <span className="font-mono text-blue-400 font-semibold">{selectedElement.animation.delay ?? 0}s</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max={Math.max(10, Math.ceil(currentSlide.duration || 10))}
+                      step="0.2"
+                      value={selectedElement.animation.delay ?? 0}
+                      onChange={(e) => onUpdateElement({
+                        animation: {
+                          ...selectedElement.animation!,
+                          delay: Number(e.target.value),
+                          cuePointSec: Number(e.target.value),
+                        }
+                      })}
+                      className="w-full accent-blue-600"
+                    />
+                    <div className="flex justify-between text-[10px] text-gray-500">
+                      <span>0s (Start)</span>
+                      <span>Slide total: {currentSlide.duration || 5}s</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-gray-400">Effect Duration</span>
+                      <span className="font-mono text-blue-400">{selectedElement.animation.duration ?? 0.6}s</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.2"
+                      max="2.0"
+                      step="0.1"
+                      value={selectedElement.animation.duration ?? 0.6}
+                      onChange={(e) => onUpdateElement({
+                        animation: { ...selectedElement.animation!, duration: Number(e.target.value) }
+                      })}
+                      className="w-full accent-blue-600"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -597,6 +711,85 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               >
                 Apply Transition to All Slides
               </button>
+            </div>
+
+            {/* KEN BURNS / SUBTLE PAN & ZOOM */}
+            <div className="space-y-3 pt-3 border-t border-[#2A2A2A]">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-semibold text-gray-200 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Ken Burns Pan & Zoom</span>
+                  </div>
+                  <p className="text-[10px] text-gray-400">Cinematic camera drift during narration</p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={currentSlide.kenBurns?.enabled ?? false}
+                  onChange={(e) => {
+                    const enabled = e.target.checked;
+                    onUpdateSlideKenBurns?.({
+                      enabled,
+                      effect: currentSlide.kenBurns?.effect || 'subtle-drift',
+                      intensity: currentSlide.kenBurns?.intensity || 'subtle',
+                    });
+                  }}
+                  className="w-4 h-4 accent-blue-600 cursor-pointer"
+                />
+              </div>
+
+              {currentSlide.kenBurns?.enabled && (
+                <div className="space-y-2 bg-[#121212] p-2.5 rounded border border-[#2A2A2A]">
+                  <div className="space-y-1">
+                    <label className="block text-[10px] text-gray-400 uppercase">Camera Drift Motion</label>
+                    <select
+                      value={currentSlide.kenBurns.effect || 'subtle-drift'}
+                      onChange={(e) => onUpdateSlideKenBurns?.({
+                        ...currentSlide.kenBurns!,
+                        effect: e.target.value as any,
+                      })}
+                      className="w-full bg-[#181818] border border-[#333] rounded px-2 py-1 text-xs text-gray-100 outline-none"
+                    >
+                      <option value="subtle-drift">Subtle Diagonal Drift</option>
+                      <option value="zoom-in">Gentle Zoom In</option>
+                      <option value="zoom-out">Gentle Zoom Out</option>
+                      <option value="pan-left">Slow Pan Left</option>
+                      <option value="pan-right">Slow Pan Right</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="block text-[10px] text-gray-400 uppercase">Intensity Scale</label>
+                    <div className="grid grid-cols-3 gap-1">
+                      {(['subtle', 'medium', 'dynamic'] as const).map((lvl) => (
+                        <button
+                          key={lvl}
+                          type="button"
+                          onClick={() => onUpdateSlideKenBurns?.({
+                            ...currentSlide.kenBurns!,
+                            intensity: lvl,
+                          })}
+                          className={`py-1 rounded text-[10px] capitalize border transition ${
+                            currentSlide.kenBurns?.intensity === lvl
+                              ? 'border-blue-500 bg-blue-600/20 text-blue-400 font-bold'
+                              : 'border-[#333] bg-[#181818] text-gray-400'
+                          }`}
+                        >
+                          {lvl}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => onUpdateSlideKenBurns?.(currentSlide.kenBurns!, true)}
+                    className="w-full py-1 text-[10px] font-medium bg-[#222] hover:bg-[#2A2A2A] border border-[#333] text-gray-300 rounded mt-1 transition"
+                  >
+                    Apply Motion to All Slides
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}

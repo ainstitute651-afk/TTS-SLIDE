@@ -1,6 +1,7 @@
 import { Presentation, VideoExportOptions, ExportProgress } from '../types/presentation';
 import { renderCompleteSlide, renderTransitionFrame, preloadPresentationImages } from './canvasRenderer';
 import { getOrGenerateSlideAudio } from './ttsService';
+import { generateTrackAudioBuffer } from './audioMusicService';
 
 export class VideoExporter {
   private isCancelled = false;
@@ -26,12 +27,30 @@ export class VideoExporter {
     this.isCancelled = false;
     this.isPaused = false;
 
-    // Determine Canvas Dimensions
+    // Determine Canvas Dimensions based on Aspect Ratio and Resolution
+    const aspectRatio = presentation.aspectRatio || '16:9';
     let width = 1920;
     let height = 1080;
-    if (options.resolution === '720p') { width = 1280; height = 720; }
-    else if (options.resolution === '1440p') { width = 2560; height = 1440; }
-    else if (options.resolution === '4K') { width = 3840; height = 2160; }
+
+    if (aspectRatio === '9:16') {
+      // Vertical Video (Shorts, Reels, TikTok)
+      if (options.resolution === '720p') { width = 720; height = 1280; }
+      else if (options.resolution === '1440p') { width = 1440; height = 2560; }
+      else if (options.resolution === '4K') { width = 2160; height = 3840; }
+      else { width = 1080; height = 1920; }
+    } else if (aspectRatio === '1:1') {
+      // Square Video (Instagram, LinkedIn)
+      if (options.resolution === '720p') { width = 720; height = 720; }
+      else if (options.resolution === '1440p') { width = 1440; height = 1440; }
+      else if (options.resolution === '4K') { width = 2160; height = 2160; }
+      else { width = 1080; height = 1080; }
+    } else {
+      // Standard 16:9 Landscape
+      if (options.resolution === '720p') { width = 1280; height = 720; }
+      else if (options.resolution === '1440p') { width = 2560; height = 1440; }
+      else if (options.resolution === '4K') { width = 3840; height = 2160; }
+      else { width = 1920; height = 1080; }
+    }
 
     const fps = options.frameRate || 30;
     const slides = presentation.slides;
@@ -125,9 +144,33 @@ export class VideoExporter {
     toCanvas.height = height;
     const toCtx = toCanvas.getContext('2d', { alpha: false })!;
 
-    // MediaRecorder setup
+    // MediaRecorder & Audio Destination setup
     const videoStream = canvas.captureStream(fps);
     const audioDestination = audioCtx.createMediaStreamDestination();
+
+    // 4b. Setup Background Music with Auto-Ducking if active
+    let musicSourceNode: AudioBufferSourceNode | null = null;
+    let musicGainNode: GainNode | null = null;
+    const bgMusic = presentation.backgroundMusic;
+
+    if (bgMusic && bgMusic.trackId && bgMusic.trackId !== 'none') {
+      try {
+        const musicBuffer = generateTrackAudioBuffer(audioCtx, bgMusic.trackId, Math.ceil(totalDurationSec) + 4);
+        musicSourceNode = audioCtx.createBufferSource();
+        musicSourceNode.buffer = musicBuffer;
+        musicSourceNode.loop = true;
+
+        musicGainNode = audioCtx.createGain();
+        const baseVolume = (bgMusic.volume / 100) * 0.35;
+        musicGainNode.gain.setValueAtTime(baseVolume, audioCtx.currentTime);
+
+        musicSourceNode.connect(musicGainNode);
+        musicGainNode.connect(audioDestination);
+        musicSourceNode.start();
+      } catch (e) {
+        console.warn('Background music track synthesis fallback:', e);
+      }
+    }
 
     const combinedStream = new MediaStream([
       ...videoStream.getVideoTracks(),
@@ -163,10 +206,14 @@ export class VideoExporter {
     const startTime = Date.now();
     let currentFrameCount = 0;
 
+    const baseMusicVol = bgMusic ? (bgMusic.volume / 100) * 0.35 : 0;
+    const activeCaptionSettings = options.includeCaptions !== false ? presentation.captionSettings : undefined;
+
     // 5. Render slides in sequence
     for (let slideIdx = 0; slideIdx < slides.length; slideIdx++) {
       if (this.isCancelled) {
         mediaRecorder.stop();
+        if (musicSourceNode) { try { musicSourceNode.stop(); } catch (e) {} }
         audioCtx.close();
         throw new Error('Export cancelled by user');
       }
@@ -175,6 +222,13 @@ export class VideoExporter {
       const audioInfo = slideAudioList[slideIdx];
       const slideDuration = audioInfo.slideDuration;
       const slideFrames = Math.ceil(slideDuration * fps);
+
+      // Auto-ducking: duck background music while slide voiceover begins
+      if (musicGainNode && bgMusic && bgMusic.ducking && audioInfo.audioBuffer) {
+        const duckedVol = baseMusicVol * Math.max(0.1, 1 - (bgMusic.duckingAmount || 60) / 100);
+        musicGainNode.gain.cancelScheduledValues(audioCtx.currentTime);
+        musicGainNode.gain.linearRampToValueAtTime(duckedVol, audioCtx.currentTime + 0.2);
+      }
 
       // Play audio buffer for this slide into the recorder destination
       if (audioInfo.audioBuffer) {
@@ -190,16 +244,18 @@ export class VideoExporter {
       const transitionFrames = Math.ceil(transitionDuration * fps);
 
       if (hasTransition) {
-        renderCompleteSlide(fromCtx, slides[slideIdx - 1], slideIdx - 1, slides.length, presentation.masterSlide, width, height);
-        renderCompleteSlide(toCtx, slide, slideIdx, slides.length, presentation.masterSlide, width, height);
+        renderCompleteSlide(fromCtx, slides[slideIdx - 1], slideIdx - 1, slides.length, presentation.masterSlide, width, height, slides[slideIdx - 1].duration, slides[slideIdx - 1].duration);
+        renderCompleteSlide(toCtx, slide, slideIdx, slides.length, presentation.masterSlide, width, height, 0, slideDuration);
       }
 
       // Frame interval timing
       const frameDurationMs = 1000 / fps;
+      let hasSwelledMusic = false;
 
       for (let f = 0; f < slideFrames; f++) {
         if (this.isCancelled) {
           mediaRecorder.stop();
+          if (musicSourceNode) { try { musicSourceNode.stop(); } catch (e) {} }
           audioCtx.close();
           throw new Error('Export cancelled by user');
         }
@@ -207,6 +263,15 @@ export class VideoExporter {
         // Handle pause
         while (this.isPaused && !this.isCancelled) {
           await new Promise((r) => setTimeout(r, 200));
+        }
+
+        const currentTimeInSlide = f / fps;
+
+        // Swell music back up when slide voiceover concludes
+        if (!hasSwelledMusic && musicGainNode && bgMusic && bgMusic.ducking && currentTimeInSlide >= (audioInfo.duration || 1)) {
+          musicGainNode.gain.cancelScheduledValues(audioCtx.currentTime);
+          musicGainNode.gain.linearRampToValueAtTime(baseMusicVol, audioCtx.currentTime + 0.6);
+          hasSwelledMusic = true;
         }
 
         // Transition frames vs static slide frames
@@ -224,7 +289,18 @@ export class VideoExporter {
             height
           );
         } else {
-          renderCompleteSlide(ctx, slide, slideIdx, slides.length, presentation.masterSlide, width, height);
+          renderCompleteSlide(
+            ctx,
+            slide,
+            slideIdx,
+            slides.length,
+            presentation.masterSlide,
+            width,
+            height,
+            currentTimeInSlide,
+            slideDuration,
+            activeCaptionSettings
+          );
         }
 
         currentFrameCount++;
@@ -266,6 +342,9 @@ export class VideoExporter {
     return new Promise((resolve, reject) => {
       mediaRecorder.onstop = () => {
         try {
+          if (musicSourceNode) {
+            try { musicSourceNode.stop(); } catch (e) {}
+          }
           audioCtx.close();
           const finalBlob = new Blob(recordedChunks, { type: mimeType });
           onProgress({

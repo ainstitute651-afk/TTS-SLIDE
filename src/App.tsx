@@ -545,6 +545,25 @@ export default function App() {
     });
   };
 
+  const handleUpdateSlideKenBurns = (kenBurns: Slide['kenBurns'], applyToAll = false) => {
+    updatePresentation((prev) => {
+      const slides = prev.slides.map((s, idx) => {
+        if (applyToAll || idx === currentSlideIndex) {
+          return { ...s, kenBurns };
+        }
+        return s;
+      });
+      return { ...prev, slides };
+    });
+  };
+
+  const handleUpdatePresentationSettings = (settings: Partial<Presentation>) => {
+    updatePresentation((prev) => ({
+      ...prev,
+      ...settings,
+    }));
+  };
+
   // JSON / HTML / Print Export
   const handleExportJSON = () => {
     const jsonStr = JSON.stringify(presentation, null, 2);
@@ -821,6 +840,8 @@ export default function App() {
           onSendBackward={handleSendBackward}
           onBringToFront={handleBringToFront}
           onSendToBack={handleSendToBack}
+          onUpdateSlideKenBurns={handleUpdateSlideKenBurns}
+          onUpdatePresentationSettings={handleUpdatePresentationSettings}
         />
       </div>
 
@@ -838,6 +859,7 @@ export default function App() {
           isOpen={showExportModal}
           onClose={() => setShowExportModal(false)}
           presentation={presentation}
+          onUpdatePresentationSettings={handleUpdatePresentationSettings}
         />
       )}
 

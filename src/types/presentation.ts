@@ -84,7 +84,8 @@ export interface ElementAnimation {
   type: 'none' | 'fade-in' | 'fly-left' | 'fly-right' | 'fly-top' | 'fly-bottom' | 'zoom-in' | 'bounce-in' | 'rotate-in';
   duration: number; // seconds
   delay: number; // seconds
-  trigger: 'on-click' | 'after-previous' | 'with-previous';
+  trigger?: 'on-click' | 'after-previous' | 'with-previous' | 'time-cue';
+  cuePointSec?: number; // cue point relative to slide narration start
 }
 
 export type BackgroundType = 'solid' | 'linear-gradient' | 'radial-gradient' | 'image' | 'pattern';
@@ -150,6 +151,12 @@ export interface PronunciationRule {
 
 export type PronunciationEntry = PronunciationRule;
 
+export interface KenBurnsSettings {
+  enabled: boolean;
+  effect: 'zoom-in' | 'zoom-out' | 'pan-left' | 'pan-right' | 'subtle-drift';
+  intensity?: number; // 1.05 to 1.25 (default 1.10)
+}
+
 export interface Slide {
   id: string;
   title: string;
@@ -165,6 +172,7 @@ export interface Slide {
   audioWaveformData?: number[];
   autoAdvance?: boolean;
   paddingDuration?: number; // seconds after audio ends, default 1.0s
+  kenBurns?: KenBurnsSettings;
 }
 
 export interface Theme {
@@ -193,6 +201,25 @@ export interface MasterSlide {
   brandingText?: string;
 }
 
+export type AspectRatio = '16:9' | '9:16' | '1:1';
+
+export interface CaptionSettings {
+  enabled: boolean;
+  style: 'karaoke-highlight' | 'bounce-pop' | 'minimal-pill' | 'classic-sub';
+  position: 'bottom' | 'center' | 'top';
+  fontSize?: number;
+  highlightColor?: string; // e.g. '#3b82f6'
+  textColor?: string;
+}
+
+export interface BackgroundMusicSettings {
+  trackId: string; // 'none' | 'ambient-flow' | 'corporate-pulse' | 'lo-fi-chill' | 'inspirational' | 'tech-minimal'
+  volume: number; // 0 - 100
+  ducking: boolean;
+  duckingAmount: number; // 0 - 100
+  loop: boolean;
+}
+
 export interface Presentation {
   id: string;
   title: string;
@@ -203,6 +230,9 @@ export interface Presentation {
   pronunciationDictionary: PronunciationRule[];
   canvasWidth: number; // standard 1920
   canvasHeight: number; // standard 1080
+  aspectRatio?: AspectRatio;
+  captionSettings?: CaptionSettings;
+  backgroundMusic?: BackgroundMusicSettings;
 }
 
 export interface VideoExportOptions {
@@ -211,6 +241,7 @@ export interface VideoExportOptions {
   bitrate: number;
   format: 'webm' | 'mp4';
   includeAudio?: boolean;
+  includeCaptions?: boolean;
 }
 
 export interface ExportProgress {

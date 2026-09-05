@@ -1,5 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
+  CheckCircle2,
+  AlertCircle,
+  Info,
+  X,
+  FileJson,
+} from 'lucide-react';
+import {
   Presentation,
   Slide,
   SlideElement,
@@ -557,6 +564,19 @@ export default function App() {
     });
   };
 
+  // Toast notification state
+  const [toastMessage, setToastMessage] = useState<{
+    text: string;
+    type: 'success' | 'error' | 'info';
+  } | null>(null);
+
+  const showToast = useCallback((text: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToastMessage({ text, type });
+    setTimeout(() => {
+      setToastMessage((prev) => (prev?.text === text ? null : prev));
+    }, 4500);
+  }, []);
+
   const handleUpdatePresentationSettings = (settings: Partial<Presentation>) => {
     updatePresentation((prev) => ({
       ...prev,
@@ -564,42 +584,166 @@ export default function App() {
     }));
   };
 
-  // JSON / HTML / Print Export
-  const handleExportJSON = () => {
-    const jsonStr = JSON.stringify(presentation, null, 2);
-    const blob = new Blob([jsonStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${presentation.title.replace(/\s+/g, '_')}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  // JSON Project Export (Clean, fully editable format)
+  const handleExportJSON = useCallback(() => {
+    try {
+      // Strip ephemeral blob URLs before saving
+      const serializableSlides = presentation.slides.map((s) => {
+        const { audioBlobUrl, ...rest } = s;
+        return rest;
+      });
 
-  const handleImportJSON = () => {
+      const exportData = {
+        app: 'SlideCast',
+        version: '2.4.0',
+        exportedAt: new Date().toISOString(),
+        id: presentation.id,
+        title: presentation.title || 'Untitled Presentation',
+        aspectRatio: presentation.aspectRatio || '16:9',
+        canvasWidth: presentation.canvasWidth || 1920,
+        canvasHeight: presentation.canvasHeight || 1080,
+        themeId: presentation.themeId || 'modern-dark',
+        slides: serializableSlides,
+        globalVoiceSettings: presentation.globalVoiceSettings,
+        pronunciationDictionary: presentation.pronunciationDictionary || [],
+        masterSlide: presentation.masterSlide,
+        captionSettings: presentation.captionSettings,
+        backgroundMusic: presentation.backgroundMusic,
+      };
+
+      const jsonStr = JSON.stringify(exportData, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const safeTitle = (presentation.title || 'slidecast_presentation')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '_');
+      const filename = `${safeTitle || 'presentation'}.json`;
+
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      savePresentation(presentation);
+      showToast(`Saved "${filename}" — you can re-import and edit anytime!`, 'success');
+    } catch (err) {
+      console.error('Export JSON error:', err);
+      showToast('Failed to export presentation as JSON.', 'error');
+    }
+  }, [presentation, showToast]);
+
+  // Robust JSON Project Importer with schema normalization & validation
+  const handleImportJSONFromFile = useCallback((file: File) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const raw = event.target?.result as string;
+        const parsed = JSON.parse(raw);
+
+        // Validation: Verify slides array
+        const rawSlides = Array.isArray(parsed.slides) ? parsed.slides : null;
+        if (!rawSlides || rawSlides.length === 0) {
+          throw new Error('No slides array found in this JSON file.');
+        }
+
+        // Schema Normalization & Fallbacks
+        const validatedSlides: Slide[] = rawSlides.map((s: any, idx: number) => ({
+          id: s.id || `slide_${Date.now()}_${idx}`,
+          title: s.title || `Slide ${idx + 1}`,
+          layout: s.layout || 'layout_content',
+          elements: Array.isArray(s.elements) ? s.elements : [],
+          background: s.background || { type: 'solid', color: '#0f172a' },
+          transition: s.transition || { type: 'fade', duration: 0.5, easing: 'ease-in-out' },
+          script: typeof s.script === 'string' ? s.script : '',
+          duration: typeof s.duration === 'number' && s.duration > 0 ? s.duration : 8,
+          voiceSettings: s.voiceSettings || presentation.globalVoiceSettings,
+          kenBurns: s.kenBurns,
+        }));
+
+        const importedPresentation: Presentation = {
+          id: parsed.id || `pres_${Date.now()}`,
+          title: parsed.title || 'Imported Presentation',
+          aspectRatio: parsed.aspectRatio || presentation.aspectRatio || '16:9',
+          canvasWidth: parsed.canvasWidth || presentation.canvasWidth || 1920,
+          canvasHeight: parsed.canvasHeight || presentation.canvasHeight || 1080,
+          themeId: parsed.themeId || presentation.themeId || 'modern-dark',
+          slides: validatedSlides,
+          globalVoiceSettings: parsed.globalVoiceSettings || presentation.globalVoiceSettings,
+          pronunciationDictionary: Array.isArray(parsed.pronunciationDictionary)
+            ? parsed.pronunciationDictionary
+            : presentation.pronunciationDictionary || [],
+          masterSlide: parsed.masterSlide || presentation.masterSlide,
+          captionSettings: parsed.captionSettings || presentation.captionSettings,
+          backgroundMusic: parsed.backgroundMusic || presentation.backgroundMusic,
+        };
+
+        // Reset undo history with new presentation
+        historyRef.current = [JSON.parse(JSON.stringify(importedPresentation))];
+        historyIndexRef.current = 0;
+
+        setPresentation(importedPresentation);
+        savePresentation(importedPresentation);
+        setCurrentSlideIndex(0);
+        setSelectedElementId(null);
+
+        showToast(
+          `Successfully loaded "${importedPresentation.title}" (${validatedSlides.length} slides). Ready to edit!`,
+          'success'
+        );
+      } catch (err: any) {
+        console.error('Failed to parse presentation JSON:', err);
+        showToast(`Could not import JSON: ${err?.message || 'Invalid format'}`, 'error');
+      }
+    };
+    reader.onerror = () => {
+      showToast('Error reading the selected JSON file.', 'error');
+    };
+    reader.readAsText(file);
+  }, [presentation.globalVoiceSettings, presentation.pronunciationDictionary, presentation.theme, presentation.masterSlide, showToast]);
+
+  const handleImportJSON = useCallback(() => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.json';
+    input.accept = '.json,application/json';
     input.onchange = (e: any) => {
       const file = e.target.files?.[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        try {
-          const parsed = JSON.parse(event.target?.result as string);
-          if (parsed.slides && Array.isArray(parsed.slides)) {
-            setPresentation(parsed);
-            setCurrentSlideIndex(0);
-            setSelectedElementId(null);
-          }
-        } catch (err) {
-          alert('Failed to load presentation JSON file.');
-        }
-      };
-      reader.readAsText(file);
+      if (file) {
+        handleImportJSONFromFile(file);
+      }
     };
     input.click();
-  };
+  }, [handleImportJSONFromFile]);
+
+  // Window drag-and-drop support for .json files
+  useEffect(() => {
+    const handleDragOver = (e: DragEvent) => {
+      if (e.dataTransfer?.types?.includes('Files')) {
+        e.preventDefault();
+      }
+    };
+
+    const handleDrop = (e: DragEvent) => {
+      if (e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+        const file = e.dataTransfer.files[0];
+        if (file.name.endsWith('.json') || file.type === 'application/json') {
+          e.preventDefault();
+          handleImportJSONFromFile(file);
+        }
+      }
+    };
+
+    window.addEventListener('dragover', handleDragOver);
+    window.addEventListener('drop', handleDrop);
+    return () => {
+      window.removeEventListener('dragover', handleDragOver);
+      window.removeEventListener('drop', handleDrop);
+    };
+  }, [handleImportJSONFromFile]);
 
   const handleExportHTML = () => {
     const serializedData = JSON.stringify(presentation);
@@ -699,6 +843,13 @@ export default function App() {
       if (e.key === 'F5') {
         e.preventDefault();
         setShowPresentationMode(true);
+        return;
+      }
+
+      // Universal save project shortcut (Ctrl+S / Cmd+S)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        handleExportJSON();
         return;
       }
 
@@ -905,6 +1056,36 @@ export default function App() {
           onClose={() => setShowIconPickerModal(false)}
           onSelectIcon={handleInsertIcon}
         />
+      )}
+
+      {/* Floating Notification Toast */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 animate-in fade-in slide-in-from-bottom-3 duration-200">
+          <div
+            className={`flex items-center gap-2.5 px-4 py-3 rounded-lg shadow-2xl border text-sm max-w-md ${
+              toastMessage.type === 'error'
+                ? 'bg-rose-950/95 text-rose-200 border-rose-800'
+                : toastMessage.type === 'info'
+                ? 'bg-blue-950/95 text-blue-200 border-blue-800'
+                : 'bg-[#181818] text-gray-100 border-[#333] shadow-blue-950/20'
+            }`}
+          >
+            {toastMessage.type === 'error' ? (
+              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+            ) : toastMessage.type === 'info' ? (
+              <Info className="w-4 h-4 text-blue-400 shrink-0" />
+            ) : (
+              <CheckCircle2 className="w-4 h-4 text-blue-400 shrink-0" />
+            )}
+            <span className="flex-1 font-medium">{toastMessage.text}</span>
+            <button
+              onClick={() => setToastMessage(null)}
+              className="text-gray-400 hover:text-white p-1 rounded transition ml-2"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

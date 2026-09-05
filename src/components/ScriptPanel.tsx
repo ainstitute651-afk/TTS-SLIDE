@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Mic,
-  Play,
-  Square,
   Volume2,
   Settings2,
   ChevronDown,
@@ -14,10 +12,12 @@ import {
   Gauge,
   Music,
   Users,
+  Activity,
 } from 'lucide-react';
 import { Slide, VoiceSettings, Presentation } from '../types/presentation';
 import { EDGE_VOICES } from '../constants/voices';
 import { getOrGenerateSlideAudio, parseDialogueTurns, previewVoiceSample } from '../services/ttsService';
+import { WaveformAnalyzer } from './WaveformAnalyzer';
 
 interface ScriptPanelProps {
   slide: Slide;
@@ -40,11 +40,10 @@ export const ScriptPanel: React.FC<ScriptPanelProps> = ({
   const [showVoiceSettings, setShowVoiceSettings] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoadingAudio, setIsLoadingAudio] = useState(false);
-  const [audioDuration, setAudioDuration] = useState<number | null>(null);
+  const [audioDuration, setAudioDuration] = useState<number | null>(slide.audioDuration || null);
+  const [analyzedWaveform, setAnalyzedWaveform] = useState<number[] | undefined>(slide.audioWaveformData);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const animFrameRef = useRef<number | null>(null);
 
   const voiceSettings: VoiceSettings = slide.voiceSettings || presentation.globalVoiceSettings || {
     voice: 'en-US-GuyNeural',
@@ -82,6 +81,9 @@ export const ScriptPanel: React.FC<ScriptPanelProps> = ({
         presentation.pronunciationDictionary
       );
       setAudioDuration(res.duration);
+      if (res.waveform) {
+        setAnalyzedWaveform(res.waveform);
+      }
 
       if (!audioRef.current) {
         audioRef.current = new Audio();
@@ -100,53 +102,6 @@ export const ScriptPanel: React.FC<ScriptPanelProps> = ({
       setIsLoadingAudio(false);
     }
   };
-
-  // Waveform canvas animation
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    let phase = 0;
-    const renderWave = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const width = canvas.width;
-      const height = canvas.height;
-      const centerY = height / 2;
-
-      ctx.beginPath();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = isPlaying ? '#38bdf8' : '#475569';
-
-      const bars = 36;
-      const barWidth = width / bars;
-
-      for (let i = 0; i < bars; i++) {
-        let amp = 0.2;
-        if (isPlaying) {
-          amp = 0.3 + 0.6 * Math.abs(Math.sin(phase + i * 0.4));
-        }
-        const barHeight = Math.max(3, height * 0.7 * amp);
-        const x = i * barWidth + barWidth / 4;
-        const y = centerY - barHeight / 2;
-
-        ctx.fillStyle = isPlaying ? (i % 2 === 0 ? '#2563eb' : '#60a5fa') : '#2a2a2a';
-        ctx.fillRect(x, y, barWidth / 2, barHeight);
-      }
-
-      if (isPlaying) {
-        phase += 0.15;
-      }
-      animFrameRef.current = requestAnimationFrame(renderWave);
-    };
-
-    renderWave();
-
-    return () => {
-      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-    };
-  }, [isPlaying]);
 
   // Insert SSML helper tag
   const insertSSMLTag = (tag: string) => {
@@ -213,8 +168,9 @@ export const ScriptPanel: React.FC<ScriptPanelProps> = ({
 
       {/* Expandable Body */}
       {isExpanded && (
-        <div className="p-3 flex flex-col md:flex-row gap-3">
-          {/* Left: Script textarea + SSML helpers */}
+        <div className="p-3 flex flex-col gap-2.5">
+          <div className="flex flex-col md:flex-row gap-3">
+            {/* Left: Script textarea + SSML helpers */}
           <div className="flex-1 flex flex-col min-w-0">
             <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
               <div className="flex items-center gap-1.5">
@@ -277,48 +233,6 @@ export const ScriptPanel: React.FC<ScriptPanelProps> = ({
 
           {/* Right: Audio Playback & Voice Selector */}
           <div className="w-full md:w-80 flex flex-col justify-between shrink-0 space-y-2">
-            {/* Waveform Canvas & Play button */}
-            <div className="flex items-center gap-2 bg-[#121212] border border-[#2A2A2A] rounded p-2">
-              <button
-                onClick={handlePlayTTS}
-                disabled={isLoadingAudio || !slide.script.trim()}
-                className={`p-2 rounded-full font-semibold transition-all shadow-md shrink-0 ${
-                  isPlaying
-                    ? 'bg-rose-600 text-white hover:bg-rose-500'
-                    : 'bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-40 shadow-blue-900/30'
-                }`}
-                title={isPlaying ? 'Stop Audio' : 'Preview Audio'}
-              >
-                {isLoadingAudio ? (
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : isPlaying ? (
-                  <Square className="w-4 h-4 fill-white" />
-                ) : (
-                  <Play className="w-4 h-4 fill-white translate-x-0.5" />
-                )}
-              </button>
-
-              <canvas
-                ref={canvasRef}
-                width={150}
-                height={28}
-                className="flex-1 h-7 rounded"
-              />
-
-              <div className="text-right shrink-0">
-                <div className="text-xs font-mono font-bold text-gray-200">
-                  {audioDuration ? `${audioDuration.toFixed(1)}s` : `~${estimatedSeconds}s`}
-                </div>
-                <button
-                  onClick={handleAutoSyncDuration}
-                  className="text-[9px] text-blue-400 hover:underline block"
-                  title="Set slide duration to match audio length"
-                >
-                  Sync slide
-                </button>
-              </div>
-            </div>
-
             {/* Voice Dropdown */}
             <div>
               <div className="flex justify-between items-center mb-0.5">
@@ -387,7 +301,26 @@ export const ScriptPanel: React.FC<ScriptPanelProps> = ({
             )}
           </div>
         </div>
-      )}
-    </div>
-  );
+
+        {/* Visual Waveform Analyzer: maps voice duration to total slide duration & highlights overtime sections */}
+        <div className="mt-1">
+          <WaveformAnalyzer
+            script={slide.script}
+            slideDuration={slide.duration || 8}
+            voiceSettings={voiceSettings}
+            pronunciationDictionary={presentation.pronunciationDictionary}
+            audioDuration={audioDuration}
+            audioRef={audioRef}
+            isPlaying={isPlaying}
+            isLoadingAudio={isLoadingAudio}
+            onTogglePlay={handlePlayTTS}
+            onUpdateSlideDuration={onUpdateSlideDuration}
+            onUpdateSlideVoiceSettings={onUpdateSlideVoiceSettings}
+            cachedWaveform={analyzedWaveform}
+          />
+        </div>
+      </div>
+    )}
+  </div>
+);
 };

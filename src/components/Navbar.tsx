@@ -156,28 +156,28 @@ export const Navbar: React.FC<NavbarProps> = ({
           <HelpCircle className="w-4 h-4" />
         </button>
 
-        {/* Import/Export utilities */}
-        <div className="flex items-center gap-0.5 border-r border-[#2A2A2A] pr-2 mr-0.5 hidden xl:flex">
+        {/* Import/Export utilities (JSON editable project & documents) */}
+        <div className="flex items-center gap-1 border-r border-[#2A2A2A] pr-2 mr-0.5">
           <button
             onClick={onImportJSON}
-            title="Import Presentation (.json)"
-            className="px-2 py-1 rounded hover:bg-[#222] text-gray-400 hover:text-gray-200 transition-colors flex items-center gap-1 text-xs"
+            title="Import Project (.json) - Open previously saved file to edit"
+            className="px-2.5 py-1 rounded bg-[#202020] hover:bg-[#282828] text-gray-200 border border-[#333] transition-colors flex items-center gap-1.5 text-xs font-medium shadow-sm"
           >
-            <Upload className="w-3.5 h-3.5" />
-            <span>Import</span>
+            <Upload className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden sm:inline">Import</span>
           </button>
           <button
             onClick={onExportJSON}
-            title="Export as JSON"
-            className="px-2 py-1 rounded hover:bg-[#222] text-gray-400 hover:text-gray-200 transition-colors flex items-center gap-1 text-xs"
+            title="Save Project as JSON (Ctrl+S) - Download file to edit later"
+            className="px-2.5 py-1 rounded bg-[#202020] hover:bg-[#282828] text-gray-200 border border-[#333] transition-colors flex items-center gap-1.5 text-xs font-medium shadow-sm"
           >
-            <Download className="w-3.5 h-3.5" />
-            <span>JSON</span>
+            <Download className="w-3.5 h-3.5 text-blue-400" />
+            <span className="hidden sm:inline">Save JSON</span>
           </button>
           <button
             onClick={onExportHTML}
             title="Export as Standalone HTML presentation"
-            className="px-2 py-1 rounded hover:bg-[#222] text-gray-400 hover:text-gray-200 transition-colors flex items-center gap-1 text-xs"
+            className="px-2 py-1 rounded hover:bg-[#222] text-gray-400 hover:text-gray-200 transition-colors hidden lg:flex items-center gap-1 text-xs"
           >
             <FileCode className="w-3.5 h-3.5" />
             <span>HTML</span>
@@ -185,7 +185,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <button
             onClick={onPrint}
             title="Print / Save as PDF"
-            className="px-2 py-1 rounded hover:bg-[#222] text-gray-400 hover:text-gray-200 transition-colors flex items-center gap-1 text-xs"
+            className="px-2 py-1 rounded hover:bg-[#222] text-gray-400 hover:text-gray-200 transition-colors hidden lg:flex items-center gap-1 text-xs"
           >
             <Printer className="w-3.5 h-3.5" />
             <span>PDF</span>
